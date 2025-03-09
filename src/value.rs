@@ -20,6 +20,7 @@ pub enum Value {
     CEnum(CEnum),
     Enum(Enum),
     Pointer(Pointer),
+    Union(Union),
 }
 
 impl Value {
@@ -27,8 +28,13 @@ impl Value {
         if let Self::Base(b) = self {
             match b {
                 Base::U8(x) => return Some(u64::from(*x)),
+                Base::U16(x) => return Some(u64::from(*x)),
                 Base::U32(x) => return Some(u64::from(*x)),
                 Base::U64(x) => return Some(*x),
+                Base::I8(x) => return Some(*x as u64),
+                Base::I16(x) => return Some(*x as u64),
+                Base::I32(x) => return Some(*x as u64),
+                Base::I64(x) => return Some(*x as u64),
                 _ => (),
             }
         }
@@ -57,8 +63,13 @@ impl Value {
             }
             Self::Base(b) => match b {
                 Base::U8(_) => "u8".into(),
+                Base::U16(_) => "u16".into(),
                 Base::U32(_) => "u32".into(),
                 Base::U64(_) => "u64".into(),
+                Base::I8(_) => "i8".into(),
+                Base::I16(_) => "i16".into(),
+                Base::I32(_) => "i32".into(),
+                Base::I64(_) => "i64".into(),
                 Base::Bool(_) => "bool".into(),
                 Base::Unit => "()".into(),
             },
@@ -66,6 +77,7 @@ impl Value {
             Self::CEnum(s) => (&s.name).into(),
             Self::Enum(s) => (&s.name).into(),
             Self::Pointer(s) => (&s.name).into(),
+            Self::Union(s) => (&s.name).into(),
         }
     }
 
@@ -94,6 +106,7 @@ impl Value {
             Self::Pointer(p) => {
                 set.insert(p.name.clone());
             }
+            Self::Union(_u) => {}
         }
     }
 
@@ -101,8 +114,13 @@ impl Value {
         match self {
             Self::Base(b) => match b {
                 Base::U8(x) => write!(f, "{x}_u8"),
+                Base::U16(x) => write!(f, "{x}_u16"),
                 Base::U32(x) => write!(f, "{x}_u32"),
                 Base::U64(x) => write!(f, "{x}_u64"),
+                Base::I8(x) => write!(f, "{x}_i8"),
+                Base::I16(x) => write!(f, "{x}_i16"),
+                Base::I32(x) => write!(f, "{x}_i32"),
+                Base::I64(x) => write!(f, "{x}_i64"),
                 Base::Bool(0) => write!(f, "false"),
                 Base::Bool(1) => write!(f, "true"),
                 Base::Bool(x) => write!(f, "{x}_bool"),
@@ -150,6 +168,10 @@ impl Value {
             Self::Enum(e) => {
                 write!(f, "{}::{}", use_table.rewrite(&e.name), e.disc)?;
                 fmt_struct_body(&e.value, world, indent, use_table, f)
+            }
+            Self::Union(_u) => {
+                // which active field?
+                Ok(())
             }
         }
     }
@@ -267,7 +289,7 @@ impl UseTable {
         Self(rewrites)
     }
 
-    fn rewrite<'a>(&'a self, name: &'a str) -> &str {
+    fn rewrite<'a>(&'a self, name: &'a str) -> &'a str {
         self.0.get(name).map(String::as_str).unwrap_or(name)
     }
 }
@@ -298,7 +320,10 @@ impl Load for Value {
             Type::Pointer(_) => Ok(Self::Pointer(Pointer::from_state(
                 machine, addr, world, ty,
             )?)),
-            _ => unimplemented!(),
+            Type::Union(_) => {
+                Ok(Self::Union(Union::from_state(machine, addr, world, ty)?))
+            }
+            bad => unimplemented!("bad {bad:?}"),
         }
     }
 }
@@ -307,8 +332,13 @@ impl Load for Value {
 pub enum Base {
     Unit,
     U8(u8),
+    U16(u16),
     U32(u32),
     U64(u64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
     Bool(u8),
 }
 
@@ -316,8 +346,13 @@ impl Base {
     pub fn as_u64(self) -> Option<u64> {
         match self {
             Self::U8(x) => Some(u64::from(x)),
+            Self::U16(x) => Some(u64::from(x)),
             Self::U32(x) => Some(u64::from(x)),
             Self::U64(x) => Some(x),
+            Self::I8(x) => Some(x as u64),
+            Self::I16(x) => Some(x as u64),
+            Self::I32(x) => Some(x as u64),
+            Self::I64(x) => Some(x as u64),
             _ => None,
         }
     }
@@ -338,6 +373,12 @@ impl Load for Base {
                 addr,
                 1,
             )?.ok_or(LoadError::DataUnavailable)? as u8)),
+            (Encoding::Unsigned, 2) => Ok(Base::U16(load_unsigned(
+                world.endian(),
+                machine,
+                addr,
+                2,
+            )?.ok_or(LoadError::DataUnavailable)? as u16)),
             (Encoding::Unsigned, 4) => Ok(Base::U32(load_unsigned(
                 world.endian(),
                 machine,
@@ -350,6 +391,30 @@ impl Load for Base {
                 addr,
                 8,
             )?.ok_or(LoadError::DataUnavailable)?)),
+            (Encoding::Signed, 1) => Ok(Base::I8(load_unsigned(
+                world.endian(),
+                machine,
+                addr,
+                1,
+            )?.ok_or(LoadError::DataUnavailable)? as i8)),
+            (Encoding::Signed, 2) => Ok(Base::I16(load_unsigned(
+                world.endian(),
+                machine,
+                addr,
+                2,
+            )?.ok_or(LoadError::DataUnavailable)? as i16)),
+            (Encoding::Signed, 4) => Ok(Base::I32(load_unsigned(
+                world.endian(),
+                machine,
+                addr,
+                4,
+            )?.ok_or(LoadError::DataUnavailable)? as i32)),
+            (Encoding::Signed, 8) => Ok(Base::I64(load_unsigned(
+                world.endian(),
+                machine,
+                addr,
+                8,
+            )?.ok_or(LoadError::DataUnavailable)? as i64)),
             (Encoding::Boolean, 1) => Ok(Base::Bool(load_unsigned(
                 world.endian(),
                 machine,
@@ -362,6 +427,26 @@ impl Load for Base {
                 Err(LoadError::UnsupportedType)
             },
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Union {
+    pub name: String,
+}
+
+impl Load for Union {
+    fn from_state<M: Machine>(
+        _machine: &M,
+        _addr: u64,
+        _world: &DebugDb,
+        ty: &Type,
+    ) -> Result<Self, LoadError<M::Error>> {
+        let Type::Union(s) = ty else { return Err(LoadError::NotAUnion); };
+
+        Ok(Self {
+            name: s.name.clone(),
+        })
     }
 }
 

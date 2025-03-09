@@ -103,6 +103,8 @@ pub enum LoadError<E> {
     WrongSize { expected: u64, got: u64 },
     #[error("base type required")]
     NotABase,
+    #[error("union type required")]
+    NotAUnion,
     #[error("enum type required")]
     NotAnEnum,
     #[error("C-like enum type required")]
@@ -477,6 +479,7 @@ pub(crate) fn load_unsigned<M: Machine>(
         })
     })
 }
+
 /*
 #[cfg(test)]
 mod test {
